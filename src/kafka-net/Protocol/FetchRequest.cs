@@ -8,24 +8,29 @@ namespace KafkaNet.Protocol
     public class FetchRequest : BaseRequest, IKafkaRequest<FetchResponse>
     {
         internal const int DefaultMinBlockingByteBufferSize = 4096;
-        private const int DefaultMaxBlockingWaitTime = 5000;
+        internal const int DefaultBufferSize = DefaultMinBlockingByteBufferSize * 8;
+        internal const int DefaultMaxBlockingWaitTime = 5000;
 
         /// <summary>
         /// Indicates the type of kafka encoding this request is
         /// </summary>
         public ApiKeyRequestType ApiKey { get { return ApiKeyRequestType.Fetch; } }
         /// <summary>
-        /// The maximum amount of time to block for the MinBytes to be available before returning.
+        /// The max wait time is the maximum amount of time in milliseconds to block waiting if insufficient data is available at the time the request is issued.
         /// </summary>
         public int MaxWaitTime = DefaultMaxBlockingWaitTime;
         /// <summary>
-        /// Defines how many bytes should be available before returning data. A value of 0 indicate a no blocking command.
+        /// This is the minimum number of bytes of messages that must be available to give a response. 
+        /// If the client sets this to 0 the server will always respond immediately, however if there is no new data since their last request they will just get back empty message sets. 
+        /// If this is set to 1, the server will respond as soon as at least one partition has at least 1 byte of data or the specified timeout occurs. 
+        /// By setting higher values in combination with the timeout the consumer can tune for throughput and trade a little additional latency for reading only large chunks of data 
+        /// (e.g. setting MaxWaitTime to 100 ms and setting MinBytes to 64k would allow the server to wait up to 100ms to try to accumulate 64k of data before responding).
         /// </summary>
         public int MinBytes = DefaultMinBlockingByteBufferSize;
 
         public List<Fetch> Fetches { get; set; }
 
-        public byte[] Encode()
+        public KafkaDataPayload Encode()
         {
             return EncodeFetchRequest(this);
         }
@@ -35,62 +40,72 @@ namespace KafkaNet.Protocol
             return DecodeFetchResponse(payload);
         }
 
-        private byte[] EncodeFetchRequest(FetchRequest request)
-        {
-            var message = new WriteByteStream();
+        private KafkaDataPayload EncodeFetchRequest(FetchRequest request)
+        {          
             if (request.Fetches == null) request.Fetches = new List<Fetch>();
 
-            message.Pack(EncodeHeader(request));
-
-            var topicGroups = request.Fetches.GroupBy(x => x.Topic).ToList();
-            message.Pack(ReplicaId.ToBytes(), request.MaxWaitTime.ToBytes(), request.MinBytes.ToBytes(), topicGroups.Count.ToBytes());
-
-            foreach (var topicGroup in topicGroups)
+            using (var message = EncodeHeader(request))
             {
-                var partitions = topicGroup.GroupBy(x => x.PartitionId).ToList();
-                message.Pack(topicGroup.Key.ToInt16SizedBytes(), partitions.Count.ToBytes());
+                var topicGroups = request.Fetches.GroupBy(x => x.Topic).ToList();
+                message.Pack(ReplicaId)
+                    .Pack(request.MaxWaitTime)
+                    .Pack(request.MinBytes)
+                    .Pack(topicGroups.Count);
 
-                foreach (var partition in partitions)
+                foreach (var topicGroup in topicGroups)
                 {
-                    foreach (var fetch in partition)
+                    var partitions = topicGroup.GroupBy(x => x.PartitionId).ToList();
+                    message.Pack(topicGroup.Key, StringPrefixEncoding.Int16)
+                        .Pack(partitions.Count);
+
+                    foreach (var partition in partitions)
                     {
-                        message.Pack(partition.Key.ToBytes(), fetch.Offset.ToBytes(), fetch.MaxBytes.ToBytes());
+                        foreach (var fetch in partition)
+                        {
+                            message.Pack(partition.Key)
+                                .Pack(fetch.Offset)
+                                .Pack(fetch.MaxBytes);
+                        }
                     }
                 }
+
+                return new KafkaDataPayload
+                {
+                    Buffer = message.Payload(),
+                    CorrelationId = request.CorrelationId,
+                    ApiKey = ApiKey
+                };
             }
-
-            message.Prepend(message.Length().ToBytes());
-
-            return message.Payload();
         }
 
         private IEnumerable<FetchResponse> DecodeFetchResponse(byte[] data)
         {
-            var stream = new ReadByteStream(data);
-
-            var correlationId = stream.ReadInt();
-
-            var topicCount = stream.ReadInt();
-            for (int i = 0; i < topicCount; i++)
+            using (var stream = new BigEndianBinaryReader(data))
             {
-                var topic = stream.ReadInt16String();
+                var correlationId = stream.ReadInt32();
 
-                var partitionCount = stream.ReadInt();
-                for (int j = 0; j < partitionCount; j++)
+                var topicCount = stream.ReadInt32();
+                for (int i = 0; i < topicCount; i++)
                 {
-                    var partitionId = stream.ReadInt();
-                    var response = new FetchResponse
+                    var topic = stream.ReadInt16String();
+
+                    var partitionCount = stream.ReadInt32();
+                    for (int j = 0; j < partitionCount; j++)
                     {
-                        Topic = topic,
-                        PartitionId = partitionId,
-                        Error = stream.ReadInt16(),
-                        HighWaterMark = stream.ReadLong()
-                    };
-                    //note: dont use initializer here as it breaks stream position.
-                    response.Messages = Message.DecodeMessageSet(stream.ReadIntPrefixedBytes())
-                        .Select(x => { x.Meta.PartitionId = partitionId; return x; })
-                        .ToList();
-                    yield return response;
+                        var partitionId = stream.ReadInt32();
+                        var response = new FetchResponse
+                        {
+                            Topic = topic,
+                            PartitionId = partitionId,
+                            Error = stream.ReadInt16(),
+                            HighWaterMark = stream.ReadInt64()
+                        };
+                        //note: dont use initializer here as it breaks stream position.
+                        response.Messages = Message.DecodeMessageSet(stream.ReadIntPrefixedBytes())
+                            .Select(x => { x.Meta.PartitionId = partitionId; return x; })
+                            .ToList();
+                        yield return response;
+                    }
                 }
             }
         }

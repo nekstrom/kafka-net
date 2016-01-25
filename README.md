@@ -19,7 +19,7 @@ var options = new KafkaOptions(new Uri("http://SERVER1:9092"), new Uri("http://S
 var router = new BrokerRouter(options);
 var client = new Producer(router);
 
-client.SendMessageAsync("TestHarness", new[] { new Message { Value = message } }).Wait();
+client.SendMessageAsync("TestHarness", new[] { new Message("hello world")}).Wait();
 
 using (client) { }
 ```
@@ -27,7 +27,7 @@ using (client) { }
 ```sh
 var options = new KafkaOptions(new Uri("http://SERVER1:9092"), new Uri("http://SERVER2:9092"));
 var router = new BrokerRouter(options);
-var consumer = new Consumer(new ConsumerOptions { Topic = "TestHarness", Router = router });
+var consumer = new Consumer(new ConsumerOptions("TestHarness", router));
 
 //Consume returns a blocking IEnumerable (ie: never ending stream)
 foreach (var message in consumer.Consume())
@@ -38,7 +38,7 @@ foreach (var message in consumer.Consume())
 ```
 
 ##### TestHarness
-The TestHarness project it a simple example console application that will read message from a kafka server and write them to the screen.  It will also take anything typed in the console and send this as a message to the kafka servers.  
+The TestHarness project is a simple example console application that will read messages from a kafka server and write them to the screen.  It will also take anything typed in the console and send this as a message to the kafka servers.  
 
 Simply modify the kafka server Uri in the code to point to a functioning test server.
 
@@ -61,7 +61,7 @@ Provides the logic for routing which partition the BrokerRouter should choose.  
 Provides a higher level class which uses the combination of the BrokerRouter and KafkaConnection to send batches of messages to a Kafka broker.
 
 ##### Consumer
-Provides a higher level class which will consumer messages from a whitelist of partitions from a single topic.  The consumption mechanism is a blocking IEnumerable of messages.  If no whitelist is provided then all partitions will be consumed creating one KafkaConnection for each partition leader.
+Provides a higher level class which will consume messages from a whitelist of partitions from a single topic.  The consumption mechanism is a blocking IEnumerable of messages.  If no whitelist is provided then all partitions will be consumed creating one KafkaConnection for each partition leader.
 
 
 
@@ -76,9 +76,7 @@ The current version of this project is a functioning "work in progress" as it wa
 * Better handling of options for providing customization of internal behaviour of the base API. (right now the classes pass around option parameters)
 * General structure of the classes is not finalized and breaking changes will occur.
 * Only Gzip compression is implemented, snappy on the todo.
-* Offset Commits - central storage of offset progress, not implemented
 * Currently only works with .NET Framework 4.5 as it uses the await command.
-* nuget package.
 * Test coverage.
 * Documentation.
 

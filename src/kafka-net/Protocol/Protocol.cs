@@ -12,7 +12,7 @@ namespace KafkaNet.Protocol
         public static byte[] Zip(byte[] bytes)
         {
             using (var destination = new MemoryStream())
-            using (var gzip = new GZipStream(destination, CompressionMode.Compress, true))
+            using (var gzip = new GZipStream(destination, CompressionLevel.Fastest, false))
             {
                 gzip.Write(bytes, 0, bytes.Length);
                 gzip.Flush();
@@ -25,7 +25,7 @@ namespace KafkaNet.Protocol
         {
             using (var source = new MemoryStream(bytes))
             using (var destination = new MemoryStream())
-            using (var gzip = new GZipStream(source, CompressionMode.Decompress, true))
+            using (var gzip = new GZipStream(source, CompressionMode.Decompress, false))
             {
                 gzip.CopyTo(destination);
                 gzip.Flush();
@@ -139,7 +139,7 @@ namespace KafkaNet.Protocol
         /// </summary>
         NotCoordinatorForConsumerCode = 16
     }
-    
+
     /// <summary>
     /// Protocol specific constants
     /// </summary>
@@ -205,6 +205,37 @@ namespace KafkaNet.Protocol
     public class UnresolvedHostnameException : ApplicationException
     {
         public UnresolvedHostnameException(string message, params object[] args) : base(string.Format(message, args)) { }
+    }
+
+    public class InvalidMetadataException : ApplicationException
+    {
+        public int ErrorCode { get; set; }
+        public InvalidMetadataException(string message, params object[] args) : base(string.Format(message, args)) { }
+    }
+
+    public class OffsetOutOfRangeException : ApplicationException
+    {
+        public Fetch FetchRequest { get; set; }
+        public OffsetOutOfRangeException(string message, params object[] args) : base(string.Format(message, args)) { }
+    }
+
+    public class BufferUnderRunException : ApplicationException
+    {
+        public int MessageHeaderSize { get; set; }
+        public int RequiredBufferSize { get; set; }
+
+        public BufferUnderRunException(int messageHeaderSize, int requiredBufferSize)
+            : base("The size of the message from Kafka exceeds the provide buffer size.")
+        {
+            MessageHeaderSize = messageHeaderSize;
+            RequiredBufferSize = requiredBufferSize;
+        }
+    }
+
+    public class KafkaApplicationException : ApplicationException
+    {
+        public int ErrorCode { get; set; }
+        public KafkaApplicationException(string message, params object[] args) : base(string.Format(message, args)) { }
     }
     #endregion
 
