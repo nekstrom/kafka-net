@@ -152,5 +152,14 @@ namespace QueueWatcher
 		{
 			LogEntry(String.Format(format, args), "Fatal");
 		}
+
+        private void copyToolStripMenuItem_Click(object sender, EventArgs e)
+        {
+            if(messages.SelectedItems.Count == 1)
+            {
+                Clipboard.Clear();
+                Clipboard.SetText(messages.SelectedItems[0].Text);
+            }
+        }
 	}
 }
